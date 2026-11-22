@@ -1,0 +1,25 @@
+// Merge into your OpenClaw config (`openclaw config patch --file config/openclaw.json5`):
+// Kimi K3.1 Pro on Cerebras as the agent's model, and the two tools exposed directly.
+{
+  agents: { defaults: { model: { primary: "cerebras/moonshotai-kimi-k3.1-pro-trial" }, thinkingDefault: "low" } },
+  models: {
+    mode: "merge",
+    providers: {
+      cerebras: {
+        baseUrl: "https://api.cerebras.ai/v1",
+        api: "openai-completions",
+        apiKey: "${CEREBRAS_API_KEY}",
+        models: [
+          {
+            id: "moonshotai-kimi-k3.1-pro-trial",
+            name: "Kimi K3.1 Pro (Cerebras)",
+            reasoning: true,
+            input: ["text", "image"],
+            compat: { supportsTools: true, supportsStrictMode: false, supportsReasoningEffort: true, supportedReasoningEfforts: ["low", "high", "max"] },
+          },
+        ],
+      },
+    },
+  },
+  tools: { toolSearch: false },
+}

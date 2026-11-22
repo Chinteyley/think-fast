@@ -1,0 +1,43 @@
+{
+  "name": "openclaw-plugin-think-fast",
+  "version": "0.1.0",
+  "description": "OpenClaw plugin: the same Kimi K3.1 Pro, the same clock on every chess puzzle. On Cerebras it gets to think more before time runs out.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --config ./vitest.config.ts",
+    "race": "bun scripts/race.ts"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "openclaw": ">=2026.5.17"
+  },
+  "dependencies": {
+    "chess.js": "^1.4.0",
+    "typebox": "^1.1.38"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "openclaw": "2026.11.6",
+    "typescript": "7.0.2",
+    "vitest": "^3.2.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.5.17"
+    },
+    "build": {
+      "openclawVersion": "2026.11.6"
+    }
+  }
+}

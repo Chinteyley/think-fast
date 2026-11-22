@@ -1,0 +1,10 @@
+{
+  "id": "think-fast",
+  "name": "Think Fast",
+  "description": "Race the same Kimi K3.1 Pro on Cerebras against GPU speed on real chess puzzles, on the same clock.",
+  "version": "0.1.0",
+  "configSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+  "activation": { "onStartup": true },
+  "skills": ["./skills"],
+  "contracts": { "tools": ["think_fast"] }
+}
