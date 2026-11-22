@@ -4,7 +4,7 @@
 
 ![The race page replaying puzzle XTKWJ: Cerebras answers e6h6 in 13.4 s; the GPU-speed lane runs out of time](docs/race.png)
 
-An [OpenClaw](https://github.com/openclaw/openclaw) plugin that gives the same model, **Kimi K3.1 Pro**, the same 20 seconds on real chess puzzles: once at **Cerebras** speed, once at **GPU** speed. A reasoning model's answer quality depends on how much it can think before time runs out. At a fixed deadline, faster inference is more intelligence.
+An [OpenClaw](https://github.com/openclaw/openclaw) plugin that gives the same model, **Kimi K3.1 Pro**, the same 20 seconds on real chess puzzles: once at **Cerebras** speed, once at **GPU** speed. A reasoning model's answer quality depends on how much it can think before time runs out. At a fixed deadline, faster inference is more intelligence: in this run, five more of Kimi's answers fit the clock.
 
 | 15 real Lichess mate-in-2 puzzles, 20 s each | Solved |
 | --- | --- |
@@ -48,14 +48,15 @@ you ─► OpenClaw agent (Kimi K3.1 Pro on Cerebras): "Think fast: race 5 puzzl
                 └─ live race page on the Gateway: /think-fast  (board, both lanes, both clocks)
 ```
 
-- **Same model, same tokens.** The GPU lane is not a different answer: it is the exact token stream Kimi produced, at the decode rate we measured for Kimi K3.1 Pro on a GPU host (Morph via OpenRouter, 156 tok/s first token to last on a 280-token completion, Nov 22, 2026; Parasail measured 83 tok/s the same day, so 156 is the faster of the two GPU hosts we measured). The only thing that changes is speed, so the only question is whether the thinking fits in the clock.
-- **Clocks start at the first token** on both lanes. Queueing and time to first token are not counted for either side. During the hackathon, Cerebras' shared queue often answered HTTP 429 first; the tool waits that out before the clock starts.
+- **Same model, same tokens.** The GPU lane is not a different answer: it is the exact token stream Kimi produced, at the decode rate we measured for Kimi K3.1 Pro on a GPU host (Morph via OpenRouter, 156 tok/s first token to last on a 280-token completion, Nov 22, 2026; Parasail measured 83 tok/s the same day, so 156 is the faster of the two GPU hosts we measured). The only thing that changes is speed, so the only question is whether the thinking fits in the clock. No live GPU calls were made: our OpenRouter credit only covered the rate probes.
+- **Clocks start at the first token** on both lanes. Queueing and time to first token are not counted for either side (Cerebras' first token took up to 31 s in these runs). During the hackathon, Cerebras' shared queue often answered HTTP 429 first; the tool waits that out before the clock starts.
 - **Graded by the rules of chess**, not by string match: a move scores if it is the puzzle's solution or any other move that forces mate in two.
+- **Only a committed answer scores.** Pause the XTKWJ race at the GPU lane's TIME and its text already reads "First move e6h6. Should verify notation UCI e6h6. Could be answer.": Kimi was still checking and had not written its `MOVE:` line. Under a deadline only the answer you commit to counts; the speed bought the check.
 - **Every run is saved** (`~/.think-fast/runs/`) and replays on the page at its real token timings: `/think-fast?run=<file>`. The runs in this repo replay too, with no API key.
 
 ## Run it
 
-Needs Node 24+, Bun, OpenClaw 2026.11.x and a Cerebras API key with Kimi K3.1 Pro access.
+Needs Node 24+, Bun, OpenClaw 2026.11.x and a Cerebras API key with Kimi K3.1 Pro access. First time with OpenClaw? Run `openclaw onboard` first.
 
 ```bash
 git clone https://github.com/Chinteyley/think-fast && cd think-fast
@@ -78,7 +79,7 @@ Ask the agent in the Control UI: **"Think fast: race 5 puzzles."** Or from the t
 ## Test
 
 ```bash
-bun run test   # the chess grader against the puzzle set, and the plugin's registration
+bun run test   # the chess grader against the puzzle set, the lane verdicts on a mocked Cerebras stream, and the plugin's registration
 ```
 
 ## Built for
