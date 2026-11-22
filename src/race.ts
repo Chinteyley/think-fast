@@ -6,6 +6,29 @@ import { answerMove, isSolved, type Puzzle } from "./grade.js";
 // first token: queueing and time to first token are left out on both sides.
 
 export const MODEL = "moonshotai-kimi-k3.1-pro-trial";
+
+/** An OpenAI-compatible chat endpoint serving Kimi K3.1 Pro. */
+export interface Endpoint {
+  name: string;
+  url: string;
+  model: string;
+  apiKey: string;
+}
+
+export const cerebras = (apiKey: string): Endpoint => ({
+  name: "Cerebras",
+  url: "https://api.cerebras.ai/v1/chat/completions",
+  model: MODEL,
+  apiKey,
+});
+
+/** Kimi K3.1 Pro on Fireworks' GPU serverless, for racing a live GPU lane (scripts/live.ts). */
+export const fireworks = (apiKey: string): Endpoint => ({
+  name: "Fireworks",
+  url: "https://api.fireworks.ai/inference/v1/chat/completions",
+  model: "accounts/fireworks/models/kimi-k3p1-pro",
+  apiKey,
+});
 /** Kimi K3.1 Pro on a GPU host (Morph, via OpenRouter), first token to last, Nov 22, 2026. */
 export const GPU_TOKENS_PER_S = 156;
 export const GPU_SOURCE = "Kimi K3.1 Pro on a GPU host (Morph via OpenRouter), measured Nov 22, 2026";
@@ -58,7 +81,8 @@ export function promptFor(puzzle: Puzzle): string {
 }
 
 interface StreamChunk {
-  choices?: { delta?: { content?: string | null; reasoning?: string | null } }[];
+  // Cerebras streams thinking as `reasoning`, Fireworks as `reasoning_content`.
+  choices?: { delta?: { content?: string | null; reasoning?: string | null; reasoning_content?: string | null } }[];
   usage?: { completion_tokens?: number };
   time_info?: { completion_time?: number };
 }
@@ -73,16 +97,16 @@ export const sleep = (ms: number, signal?: AbortSignal) =>
 
 /** Opens the stream, waiting out the shared queue's 429s (they are not on either clock). */
 async function open(
-  apiKey: string,
+  endpoint: Endpoint,
   body: unknown,
   emit: (e: RaceEvent) => void,
   signal?: AbortSignal,
 ): Promise<{ response: Response; retries: number }> {
   for (let attempt = 0; attempt < QUEUE_LIMIT; attempt++) {
     if (signal?.aborted) throw new Error("race cancelled");
-    const response = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+    const response = await fetch(endpoint.url, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${endpoint.apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal,
     });
@@ -93,36 +117,47 @@ async function open(
       continue;
     }
     if (!response.ok || !response.body) {
-      throw new Error(`Cerebras ${response.status}: ${(await response.text()).slice(0, 200)}`);
+      throw new Error(`${endpoint.name} ${response.status}: ${(await response.text()).slice(0, 200)}`);
     }
     return { response, retries: attempt };
   }
-  throw new Error(`Cerebras queue did not admit the request after ${QUEUE_LIMIT} tries`);
+  throw new Error(`${endpoint.name} queue did not admit the request after ${QUEUE_LIMIT} tries`);
 }
 
-/** Races one puzzle. Emits every step; returns the graded result for both lanes. */
-export async function racePuzzle(
+export interface LiveLane {
+  lane: LaneResult;
+  deltas: Delta[];
+  retries: number;
+  firstTokenS: number;
+  serverCompletionS: number | null;
+  /** The clock ran out before the answer, so the stream was cut. */
+  timedOut: boolean;
+}
+
+/** Streams one puzzle from `endpoint` on a clock that starts at its first token, and grades it. */
+export async function streamLane(
+  endpoint: Endpoint,
   puzzle: Puzzle,
   clockS: number,
-  apiKey: string,
   emit: (e: RaceEvent) => void,
   signal?: AbortSignal,
-): Promise<PuzzleResult> {
+): Promise<LiveLane> {
   const started = performance.now();
   const body = {
-    model: MODEL,
+    model: endpoint.model,
     messages: [{ role: "user", content: promptFor(puzzle) }],
     stream: true,
     stream_options: { include_usage: true },
     reasoning_effort: "high",
     max_completion_tokens: 16000,
   };
-  const { response, retries } = await open(apiKey, body, emit, signal);
+  const { response, retries } = await open(endpoint, body, emit, signal);
   const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
 
   const deltas: Delta[] = [];
   let first: number | null = null;
-  let answer = "";
+  // Only what arrives inside the clock counts: a MOVE line after it can't replace the answer.
+  let inWindow = "";
   let chars = 0;
   let usageTokens: number | null = null;
   let serverS: number | null = null;
@@ -145,13 +180,14 @@ export async function racePuzzle(
       buffer += value;
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
-      for (const line of lines) {
+      for (const raw of lines) {
+        const line = raw.trimEnd();
         if (!line.startsWith("data: ") || line === "data: [DONE]") continue;
         const chunk = JSON.parse(line.slice(6)) as StreamChunk;
         if (chunk.usage?.completion_tokens) usageTokens = chunk.usage.completion_tokens;
         if (chunk.time_info?.completion_time) serverS = chunk.time_info.completion_time;
         for (const choice of chunk.choices ?? []) {
-          const reasoning = choice.delta?.reasoning ?? "";
+          const reasoning = choice.delta?.reasoning ?? choice.delta?.reasoning_content ?? "";
           const content = choice.delta?.content ?? "";
           if (!reasoning && !content) continue;
           const now = performance.now();
@@ -169,8 +205,9 @@ export async function racePuzzle(
             deltas.push(delta);
             emit({ type: "delta", delta });
           }
-          answer += content;
-          if (answeredAt === null && answerMove(answer) && t <= clockS) answeredAt = t;
+          if (t > clockS) continue;
+          inWindow += content;
+          if (answeredAt === null && answerMove(inWindow)) answeredAt = t;
         }
       }
     }
@@ -179,21 +216,41 @@ export async function racePuzzle(
   }
 
   const tokens = usageTokens ?? Math.round(chars / CHARS_PER_TOKEN);
-  const move = answeredAt === null ? null : answerMove(answer);
-  const cerebras: LaneResult = {
-    answered: answeredAt !== null,
-    move,
-    solved: answeredAt !== null && isSolved(puzzle, move),
-    seconds: answeredAt ?? clockS,
-    tokens,
+  const move = answeredAt === null ? null : answerMove(inWindow);
+  return {
+    lane: {
+      answered: answeredAt !== null,
+      move,
+      solved: answeredAt !== null && isSolved(puzzle, move),
+      seconds: answeredAt ?? clockS,
+      tokens,
+    },
+    deltas,
+    retries,
+    firstTokenS: first === null ? 0 : (first - started) / 1000,
+    serverCompletionS: serverS,
+    timedOut,
   };
+}
+
+/** Races one puzzle. Emits every step; returns the graded result for both lanes. */
+export async function racePuzzle(
+  puzzle: Puzzle,
+  clockS: number,
+  apiKey: string,
+  emit: (e: RaceEvent) => void,
+  signal?: AbortSignal,
+): Promise<PuzzleResult> {
+  const live = await streamLane(cerebras(apiKey), puzzle, clockS, emit, signal);
+  const { lane: cerebrasLane, deltas, timedOut } = live;
+  const { tokens, move } = cerebrasLane;
   // The GPU lane decodes the same tokens: it answers only if all of them fit in the clock.
   const neededS = tokens / GPU_TOKENS_PER_S;
-  const gpuAnswered = cerebras.answered && !timedOut && neededS <= clockS;
+  const gpuAnswered = cerebrasLane.answered && !timedOut && neededS <= clockS;
   const gpu = {
     answered: gpuAnswered,
     move: gpuAnswered ? move : null,
-    solved: gpuAnswered && cerebras.solved,
+    solved: gpuAnswered && cerebrasLane.solved,
     seconds: gpuAnswered ? neededS : clockS,
     tokens: Math.min(tokens, Math.floor(clockS * GPU_TOKENS_PER_S)),
     neededS,
@@ -201,11 +258,11 @@ export async function racePuzzle(
   const result: PuzzleResult = {
     puzzle,
     clockS,
-    queueRetries: retries,
-    firstTokenS: first === null ? 0 : (first - started) / 1000,
+    queueRetries: live.retries,
+    firstTokenS: live.firstTokenS,
     deltas,
-    serverCompletionS: serverS,
-    cerebras,
+    serverCompletionS: live.serverCompletionS,
+    cerebras: cerebrasLane,
     gpu,
   };
   const { deltas: _omit, ...summary } = result;

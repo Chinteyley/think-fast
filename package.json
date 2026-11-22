@@ -8,7 +8,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run --config ./vitest.config.ts",
-    "race": "bun scripts/race.ts"
+    "race": "bun scripts/race.ts",
+    "live": "bun scripts/live.ts"
   },
   "files": [
     "dist",
