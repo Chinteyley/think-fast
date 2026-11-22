@@ -1,21 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Puzzle } from "./grade.js";
 import puzzles from "./puzzles.json" with { type: "json" };
-import { racePuzzle } from "./race.js";
+import { fireworks, racePuzzle, streamLane } from "./race.js";
 
 // The lane verdicts behind the score: Cerebras answers if its MOVE line lands inside the clock;
 // the GPU lane gets the same tokens at 156 tok/s and answers only if all of them fit in it.
 const QC2vI = (puzzles as Puzzle[]).find((p) => p.id === "QC2vI")!;
 const sse = (o: unknown) => `data: ${JSON.stringify(o)}\n\n`;
 
-/** A Cerebras stream that thinks for `chunks` deltas, then answers, then reports `tokens` used. */
-function stream(tokens: number, answer: string | null, chunks = 3) {
+/** A stream that thinks for `chunks` deltas, then answers, then reports `tokens` used. */
+function stream(tokens: number, answer: string | null, chunks = 3, thinking = "reasoning") {
   const enc = new TextEncoder();
   let sent = 0;
   return new ReadableStream<Uint8Array>({
     async pull(c) {
       await new Promise((r) => setTimeout(r, 20));
-      if (sent++ < chunks || answer === null) return c.enqueue(enc.encode(sse({ choices: [{ delta: { reasoning: "thinking " } }] })));
+      if (sent++ < chunks || answer === null) return c.enqueue(enc.encode(sse({ choices: [{ delta: { [thinking]: "thinking " } }] })));
       c.enqueue(enc.encode(sse({ choices: [{ delta: { content: `MOVE: ${answer}` } }] }) + sse({ choices: [], usage: { completion_tokens: tokens } }) + "data: [DONE]\n\n"));
       c.close();
     },
@@ -47,5 +47,13 @@ describe("racePuzzle", () => {
     const r = await race(stream(0, null), 0.2);
     expect(r.cerebras).toMatchObject({ answered: false, solved: false, seconds: 0.2 });
     expect(r.gpu.answered).toBe(false);
+  });
+
+  it("starts a Fireworks lane's clock at its first reasoning_content token", async () => {
+    vi.stubGlobal("fetch", async () => new Response(stream(300, "h5h2", 3, "reasoning_content"), { status: 200 }));
+    const live = await streamLane(fireworks("test-key"), QC2vI, 5, () => {});
+    expect(live.deltas.filter((d) => d.kind === "reasoning")).toHaveLength(3);
+    expect(live.lane).toMatchObject({ answered: true, solved: true });
+    expect(live.lane.seconds).toBeGreaterThan(0.03);
   });
 });
