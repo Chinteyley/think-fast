@@ -74,7 +74,7 @@ function fmt(s){ return Math.max(0, s).toFixed(1); }
 function tail(text){ return text.length > 2600 ? text.slice(-2600) : text; }
 
 function showScore(c, g, n){
-  $("score").innerHTML = "Cerebras <span class=c>" + c + "</span> · GPU speed <span class=g>" + g + "</span> <span style='color:var(--soft);font-weight:500;font-size:17px'>of " + n + " solved</span>";
+  $("score").innerHTML = "Cerebras <span class=c>" + c + "</span> · GPU speed <span class=g>" + g + "</span>" + (n ? " <span style='color:var(--soft);font-weight:500;font-size:17px'>of " + n + " solved</span>" : "");
 }
 function onEvent(e){
   // The race's own total, for a page that joined part-way.
@@ -83,6 +83,8 @@ function onEvent(e){
   if (!state && e.type !== "puzzle") return;
   if (e.type === "puzzle") {
     cancelAnimationFrame(raf);
+    // A new race starts its own tally.
+    if (e.index === 0) { score = {c:0,g:0,n:0}; showScore(0, 0, 0); }
     state = {p: e.puzzle, clock: e.clockS, rate: e.gpuTokensPerS, text: "", first: null, result: null};
     $("g-src").textContent = "the Cerebras tokens, replayed at " + e.gpuTokensPerS + " tok/s (rate measured on a GPU host)";
     $("task").innerHTML = "Puzzle " + (e.index+1) + " of " + e.total + " · <b>" + (e.puzzle.fen.split(" ")[1]==="w"?"White":"Black") + " mates in 2</b> · rated " + e.puzzle.rating;
@@ -136,7 +138,9 @@ if (run) replay(run); else { const es = new EventSource("/think-fast/events"); e
 
 // Replays a saved run with its recorded timings: each puzzle's deltas at their own times.
 async function replay(file){
-  const data = await (await fetch("/think-fast/runs/" + encodeURIComponent(file))).json();
+  const res = await fetch("/think-fast/runs/" + encodeURIComponent(file));
+  if (!res.ok) { $("task").textContent = "No saved run named " + file; return; }
+  const data = await res.json();
   $("c-src").textContent = "saved run, at its real token timings";
   $("note").textContent = "Replay of a recorded run (" + data.startedAt + "), at its real token timings. Queue time is not shown or counted.";
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
