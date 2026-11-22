@@ -25,7 +25,7 @@ await mkdir(dir, { recursive: true });
 /** Decode rate over the lane's stream, first token to last (tokens estimated if it was cut). */
 const rate = (l: LiveLane) => l.lane.tokens / Math.max(l.deltas.at(-1)?.t ?? 0, 1e-3);
 const show = (l: LiveLane) =>
-  `${l.lane.answered ? `${l.lane.move}${l.lane.solved ? "✓" : "✗"} ${l.lane.seconds.toFixed(1)}s` : "TIME"} · ${l.lane.tokens} tok · ${rate(l).toFixed(0)} tok/s`;
+  `${l.lane.answered ? `${l.lane.move}${l.lane.solved ? "✓" : "✗"} ${l.lane.seconds.toFixed(1)}s` : l.timedOut ? "TIME" : "no answer"} · ${l.lane.tokens} tok · ${rate(l).toFixed(0)} tok/s`;
 
 for (const puzzle of chosen) {
   const raced = await Promise.all(lanes.map((e) => streamLane(e, puzzle, clockS, () => {})));

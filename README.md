@@ -39,9 +39,9 @@ This 15-puzzle run came from `bun run race`, the same engine without an agent tu
 
 The replay keeps everything but speed the same. To check it against a real GPU host, `bun run live` sends each puzzle to Kimi K3.1 Pro on Cerebras and on Fireworks' serverless GPUs (`accounts/fireworks/models/kimi-k3p1-pro`) at the same time: the same prompt, reasoning high, each lane on 20 s from its own first token, graded the same way.
 
-Run of Nov 22, 2026 ([`runs/live/2026-11-22T09-01-04-082Z.json`](runs/live/2026-11-22T09-01-04-082Z.json)): **Cerebras 9 / 15, Fireworks 0 / 15.** Fireworks streamed a median of ≈ 40 tok/s (≈ 17–67) and every one of its lanes was still thinking at the clock: its longest 20 s came to ≈ 1,344 tokens, and Cerebras' shortest solve took 1,911. Cerebras solved a different nine this time (six overlap with the run above), since reasoning is sampled. Next to that, the replay's 156 tok/s is the generous GPU number.
+Run of Nov 22, 2026 ([`runs/live/2026-11-22T09-01-04-082Z.json`](runs/live/2026-11-22T09-01-04-082Z.json)): **Cerebras 9 / 15, Fireworks 0 / 15.** Fireworks streamed a median of ≈ 40 tok/s (≈ 17–67) and every one of its lanes was still thinking at the clock: its longest 20 s came to ≈ 1,344 tokens, and Cerebras' shortest solve took 1,911. Cerebras solved a different nine this time (six overlap with the run above), since reasoning is sampled; replayed at 156 tok/s, this run's Cerebras tokens give 4 / 15 again. Next to that, the replay's 156 tok/s is the generous GPU number.
 
-Fireworks' streams were cut at the clock, so their token counts (≈) are characters ÷ 2.95; three uncut probes the same day measured 49, 38 and 36 tok/s exactly. As in the replay, queueing and time to first token are not counted on either side (Cerebras' first token took up to 142 s in this run, Fireworks' up to 4 s).
+Fireworks' streams were cut at the clock, so their token counts (≈) are characters ÷ 2.95; three uncut probes the same day measured 49, 38 and 36 tok/s exactly. As in the replay, the clocks leave out queueing and time to first token on both sides, and here that matters: on the hackathon's shared Cerebras trial key the first token took a median 60 s (up to 142 s), against 1.7 s on Fireworks. Counted from the moment each request was sent, this live race would be 1 to 0. What it measures is how much thinking fits in 20 s once each model is running.
 
 ## How it works
 
@@ -60,7 +60,7 @@ you ─► OpenClaw agent (Kimi K3.1 Pro on Cerebras): "Think fast: race 5 puzzl
 - **Clocks start at the first token** on both lanes. Queueing and time to first token are not counted for either side (Cerebras' first token took up to 31 s in these runs). During the hackathon, Cerebras' shared queue often answered HTTP 429 first; the tool waits that out before the clock starts.
 - **Graded by the rules of chess**, not by string match: a move scores if it is the puzzle's solution or any other move that forces mate in two.
 - **Only a committed answer scores.** Pause the XTKWJ race at the GPU lane's TIME and its text already reads "First move e6h6. Should verify notation UCI e6h6. Could be answer.": Kimi was still checking and had not written its `MOVE:` line. Under a deadline only the answer you commit to counts; the speed bought the check.
-- **Every run is saved** (`~/.think-fast/runs/`) and replays on the page at its real token timings: `/think-fast?run=<file>`. The runs in this repo replay too, with no API key.
+- **Every race is saved** (`~/.think-fast/runs/`) and replays on the page at its real token timings: `/think-fast?run=<file>`. The runs in this repo replay too, with no API key. Live races (`bun run live`) are saved as JSON under `runs/live/`, with every delta of both lanes; the page doesn't replay those.
 
 ## Run it
 

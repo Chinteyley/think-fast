@@ -156,7 +156,8 @@ export async function streamLane(
 
   const deltas: Delta[] = [];
   let first: number | null = null;
-  let answer = "";
+  // Only what arrives inside the clock counts: a MOVE line after it can't replace the answer.
+  let inWindow = "";
   let chars = 0;
   let usageTokens: number | null = null;
   let serverS: number | null = null;
@@ -179,7 +180,8 @@ export async function streamLane(
       buffer += value;
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
-      for (const line of lines) {
+      for (const raw of lines) {
+        const line = raw.trimEnd();
         if (!line.startsWith("data: ") || line === "data: [DONE]") continue;
         const chunk = JSON.parse(line.slice(6)) as StreamChunk;
         if (chunk.usage?.completion_tokens) usageTokens = chunk.usage.completion_tokens;
@@ -203,8 +205,9 @@ export async function streamLane(
             deltas.push(delta);
             emit({ type: "delta", delta });
           }
-          answer += content;
-          if (answeredAt === null && answerMove(answer) && t <= clockS) answeredAt = t;
+          if (t > clockS) continue;
+          inWindow += content;
+          if (answeredAt === null && answerMove(inWindow)) answeredAt = t;
         }
       }
     }
@@ -213,7 +216,7 @@ export async function streamLane(
   }
 
   const tokens = usageTokens ?? Math.round(chars / CHARS_PER_TOKEN);
-  const move = answeredAt === null ? null : answerMove(answer);
+  const move = answeredAt === null ? null : answerMove(inWindow);
   return {
     lane: {
       answered: answeredAt !== null,

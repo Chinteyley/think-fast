@@ -56,4 +56,25 @@ describe("racePuzzle", () => {
     expect(live.lane).toMatchObject({ answered: true, solved: true });
     expect(live.lane.seconds).toBeGreaterThan(0.03);
   });
+
+  it("grades the answer given inside the clock, not a MOVE line that arrives after it", async () => {
+    const enc = new TextEncoder();
+    const events = [
+      [0, { reasoning: "thinking " }],
+      [10, { content: "MOVE: h5h1\n" }],
+      [90, { content: "MOVE: h5h2" }],
+    ] as const;
+    const body = new ReadableStream<Uint8Array>({
+      async start(c) {
+        for (const [wait, delta] of events) {
+          await new Promise((r) => setTimeout(r, wait));
+          c.enqueue(enc.encode(sse({ choices: [{ delta }] }).replace("\n\n", "\r\n\r\n")));
+        }
+        c.enqueue(enc.encode("data: [DONE]\r\n\r\n"));
+        c.close();
+      },
+    });
+    const r = await race(body, 0.05);
+    expect(r.cerebras).toMatchObject({ answered: true, move: "h5h1", solved: false });
+  });
 });
