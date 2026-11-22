@@ -33,17 +33,17 @@ footer{display:flex;justify-content:space-between;align-items:center;border-top:
 .score{font:700 24px "SF Pro Display",Inter,system-ui,sans-serif}.score .c{color:var(--orange)}.score .g{color:var(--gpu)}
 .note{color:var(--soft);font-size:14px;max-width:62%;text-align:right}
 </style></head><body><div class="wrap">
-<header><h1>Think <b>Fast</b></h1><div class="sub" id="sub">Same Kimi K3.1 Pro. Same clock. One runs on Cerebras.</div></header>
+<header><h1>Think <b>Fast</b></h1><div class="sub" id="sub">Same Kimi K3.1 Pro, same tokens, same clock. Only the speed differs.</div></header>
 <div class="stage">
-  <section class="lane cb"><div class="who">Kimi K3.1 Pro · Cerebras<small>live stream</small></div>
+  <section class="lane cb"><div class="who">Kimi K3.1 Pro · Cerebras<small id="c-src">live stream from Cerebras</small></div>
     <div class="clock" id="c-clock">--.-</div><div class="think" id="c-think"></div>
     <div><div class="meta" id="c-meta">0 tokens</div><div class="verdict" id="c-verdict"></div></div></section>
   <section class="mid"><div class="task" id="task">Waiting for a race…</div><div class="board" id="board"></div><div class="queue" id="queue"></div></section>
-  <section class="lane gp"><div class="who">Kimi K3.1 Pro · GPU speed<small id="g-src">same tokens at a measured GPU rate</small></div>
+  <section class="lane gp"><div class="who">Kimi K3.1 Pro · GPU speed<small id="g-src">the Cerebras tokens, replayed at a measured GPU rate</small></div>
     <div class="clock" id="g-clock">--.-</div><div class="think" id="g-think"></div>
     <div><div class="meta" id="g-meta">0 tokens</div><div class="verdict" id="g-verdict"></div></div></section>
 </div>
-<footer><div class="score" id="score">Cerebras <span class="c">0</span> · GPU <span class="g">0</span></div>
+<footer><div class="score" id="score">Cerebras <span class="c">0</span> · GPU speed <span class="g">0</span></div>
 <div class="note" id="note">Each clock starts at that lane's first token; queue time is not counted.</div></footer>
 </div>
 <script>
@@ -73,11 +73,18 @@ function drawBoard(fen, mv){
 function fmt(s){ return Math.max(0, s).toFixed(1); }
 function tail(text){ return text.length > 2600 ? text.slice(-2600) : text; }
 
+function showScore(c, g, n){
+  $("score").innerHTML = "Cerebras <span class=c>" + c + "</span> · GPU speed <span class=g>" + g + "</span> <span style='color:var(--soft);font-weight:500;font-size:17px'>of " + n + " solved</span>";
+}
 function onEvent(e){
+  // The race's own total, for a page that joined part-way.
+  if (e.type === "score") { showScore(e.cerebras, e.gpu, e.of); return; }
+  // A page opened mid-puzzle waits for the next one.
+  if (!state && e.type !== "puzzle") return;
   if (e.type === "puzzle") {
     cancelAnimationFrame(raf);
     state = {p: e.puzzle, clock: e.clockS, rate: e.gpuTokensPerS, text: "", first: null, result: null};
-    $("g-src").textContent = "same tokens at " + e.gpuTokensPerS + " tok/s (measured GPU host)";
+    $("g-src").textContent = "the Cerebras tokens, replayed at " + e.gpuTokensPerS + " tok/s (rate measured on a GPU host)";
     $("task").innerHTML = "Puzzle " + (e.index+1) + " of " + e.total + " · <b>" + (e.puzzle.fen.split(" ")[1]==="w"?"White":"Black") + " mates in 2</b> · rated " + e.puzzle.rating;
     drawBoard(e.puzzle.fen, null);
     for (const k of ["c","g"]) { $(k+"-clock").textContent = fmt(e.clockS); $(k+"-think").textContent = "";
@@ -117,7 +124,7 @@ function tick(){
   if (gDone && !$("g-verdict").textContent) verdict("g", r.gpu);
   if (cDone && gDone) {
     score.n++; if (r.cerebras.solved) score.c++; if (r.gpu.solved) score.g++;
-    $("score").innerHTML = "Cerebras <span class=c>" + score.c + "</span> · GPU <span class=g>" + score.g + "</span> <span style='color:var(--soft);font-weight:500;font-size:17px'>of " + score.n + " solved</span>";
+    showScore(score.c, score.g, score.n);
     return;
   }
   raf = requestAnimationFrame(tick);
@@ -130,6 +137,7 @@ if (run) replay(run); else { const es = new EventSource("/think-fast/events"); e
 // Replays a saved run with its recorded timings: each puzzle's deltas at their own times.
 async function replay(file){
   const data = await (await fetch("/think-fast/runs/" + encodeURIComponent(file))).json();
+  $("c-src").textContent = "saved run, at its real token timings";
   $("note").textContent = "Replay of a recorded run (" + data.startedAt + "), at its real token timings. Queue time is not shown or counted.";
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   await wait(+(new URLSearchParams(location.search).get("delay") || 1500));

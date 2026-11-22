@@ -64,7 +64,8 @@ interface StreamChunk {
 }
 
 const QUEUE_LIMIT = 60;
-const sleep = (ms: number, signal?: AbortSignal) =>
+/** Waits `ms`, or less if `signal` aborts. */
+export const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve) => {
     const timer = setTimeout(resolve, ms);
     signal?.addEventListener("abort", () => (clearTimeout(timer), resolve()), { once: true });
@@ -129,10 +130,13 @@ export async function racePuzzle(
   let timedOut = false;
   let buffer = "";
 
-  const deadline = setTimeout(() => {
+  const cutOff = () => {
+    if (answeredAt !== null) return;
     timedOut = true;
     void reader.cancel();
-  }, (clockS + 600) * 1000); // replaced at first token; this only guards a stream that never starts
+  };
+  // Guards a stream that never starts; replaced by the lane's clock at the first token.
+  let deadline = setTimeout(cutOff, (clockS + 600) * 1000);
 
   try {
     for (;;) {
@@ -155,12 +159,7 @@ export async function racePuzzle(
             first = now;
             emit({ type: "first-token", afterS: (now - started) / 1000 });
             clearTimeout(deadline);
-            setTimeout(() => {
-              if (answeredAt === null) {
-                timedOut = true;
-                void reader.cancel();
-              }
-            }, clockS * 1000);
+            deadline = setTimeout(cutOff, clockS * 1000);
           }
           const t = (now - first) / 1000;
           for (const [text, kind] of [[reasoning, "reasoning"], [content, "answer"]] as const) {

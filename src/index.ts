@@ -2,13 +2,14 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 import type { Puzzle } from "./grade.js";
 import { PAGE } from "./page.js";
 import puzzleSet from "./puzzles.json" with { type: "json" };
-import { GPU_SOURCE, GPU_TOKENS_PER_S, MODEL, type PuzzleResult, type RaceEvent, racePuzzle } from "./race.js";
+import { GPU_SOURCE, GPU_TOKENS_PER_S, MODEL, type PuzzleResult, type RaceEvent, racePuzzle, sleep } from "./race.js";
 
 // Think Fast: an OpenClaw tool that races Kimi K3.1 Pro on Cerebras against GPU speed on real
 // Lichess mate-in-2 puzzles, on the same clock, and a live race page served by the Gateway at
@@ -22,6 +23,8 @@ const Params = Type.Object({
 });
 type RaceParams = Static<typeof Params>;
 const RUNS_DIR = join(homedir(), ".think-fast", "runs");
+/** The runs shipped in the repo, so the page replays them with no API key. */
+const BUNDLED_RUNS = fileURLToPath(new URL("../runs/", import.meta.url));
 const listeners = new Set<(e: RaceEvent) => void>();
 let running = false;
 
@@ -41,11 +44,14 @@ function events(req: IncomingMessage, res: ServerResponse): boolean {
 async function runs(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const name = basename(decodeURIComponent((req.url ?? "").split("?")[0]!.replace(/^\/think-fast\/runs\/?/, "")));
   if (!name) {
-    const files = (await readdir(RUNS_DIR).catch(() => [])).filter((f) => f.endsWith(".json")).sort();
+    const listed = await Promise.all([RUNS_DIR, BUNDLED_RUNS].map((dir) => readdir(dir).catch(() => [])));
+    const files = [...new Set(listed.flat())].filter((f) => f.endsWith(".json")).sort();
     res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(files));
     return true;
   }
-  const body = await readFile(join(RUNS_DIR, name), "utf8").catch(() => null);
+  const body =
+    (await readFile(join(RUNS_DIR, name), "utf8").catch(() => null)) ??
+    (await readFile(join(BUNDLED_RUNS, name), "utf8").catch(() => null));
   if (body === null) res.writeHead(404).end("no such run");
   else res.writeHead(200, { "Content-Type": "application/json" }).end(body);
   return true;
@@ -97,7 +103,13 @@ export default definePluginEntry({
         try {
           for (const [index, puzzle] of chosen.entries()) {
             emit({ type: "puzzle", index, total: chosen.length, puzzle, clockS, gpuTokensPerS: GPU_TOKENS_PER_S });
-            results.push(await racePuzzle(puzzle, clockS, apiKey, emit, signal));
+            const result = await racePuzzle(puzzle, clockS, apiKey, emit, signal);
+            results.push(result);
+            // The GPU lane can still be thinking on the page after Cerebras' stream ends: hold the
+            // next puzzle until both lanes have their verdict, then a beat to read it (as a replay does).
+            const end = Math.max(result.cerebras.seconds, result.gpu.answered ? result.gpu.neededS : clockS);
+            const shown = result.deltas.at(-1)?.t ?? 0;
+            await sleep(Math.max(0, end - shown) * 1000 + 2500, signal);
           }
         } finally {
           running = false;

@@ -1,5 +1,5 @@
 // Merge into your OpenClaw config (`openclaw config patch --file config/openclaw.json5`):
-// Kimi K3.1 Pro on Cerebras as the agent's model, and the two tools exposed directly.
+// Kimi K3.1 Pro on Cerebras as the agent's model, and the think_fast tool exposed directly (no tool search).
 {
   agents: { defaults: { model: { primary: "cerebras/moonshotai-kimi-k3.1-pro-trial" }, thinkingDefault: "low" } },
   models: {
