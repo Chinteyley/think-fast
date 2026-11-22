@@ -4,12 +4,12 @@
 
 ![The race page replaying puzzle XTKWJ: Cerebras answers e6h6 in 13.4 s; the GPU-speed lane runs out of time](docs/race.png)
 
-An [OpenClaw](https://github.com/openclaw/openclaw) plugin that gives the same model, **Kimi K3.1 Pro**, the same 20 seconds on real chess puzzles: once at **Cerebras** speed, once at **GPU** speed. A reasoning model's answer quality depends on how much it can think before time runs out. At a fixed deadline, faster inference is more intelligence: in this run, five more of Kimi's answers fit the clock.
+An [OpenClaw](https://github.com/openclaw/openclaw) plugin that gives the same model, **Kimi K3.1 Pro**, the same 20 seconds on real chess puzzles: once at **Cerebras** speed, once at **GPU** speed. A reasoning model's answer quality depends on how much it can think before time runs out. At a fixed deadline, faster inference is more intelligence: in this run, five more of Kimi's answers fit the clock. Raced live against the same model on Fireworks' GPUs, it was 9 to 0.
 
-| 15 real Lichess mate-in-2 puzzles, 20 s each | Solved |
-| --- | --- |
-| Kimi K3.1 Pro on Cerebras | **9 / 15** |
-| Same tokens at GPU speed (156 tok/s) | **4 / 15** |
+| 15 real Lichess mate-in-2 puzzles, 20 s each from the first token | Cerebras | GPU |
+| --- | --- | --- |
+| Same tokens: the GPU lane replays Kimi's Cerebras tokens at 156 tok/s, the fastest GPU host we measured | **9 / 15** | **4 / 15** |
+| [Raced live](#raced-live): both lanes at once, the GPU lane on Fireworks (≈ 40 tok/s) | **9 / 15** | **0 / 15** |
 
 Run of Nov 22, 2026 ([`runs/2026-11-22T03-32-19-317Z.json`](runs/2026-11-22T03-32-19-317Z.json)), every puzzle at 20 s:
 
@@ -35,6 +35,14 @@ Run of Nov 22, 2026 ([`runs/2026-11-22T03-32-19-317Z.json`](runs/2026-11-22T03-3
 
 This 15-puzzle run came from `bun run race`, the same engine without an agent turn, because Cerebras' shared queue was too busy for a long agent turn at the time. Every delta, move, time and token count is in [`runs/`](runs/), with the two runs the OpenClaw agent started itself (2 puzzles: Cerebras 2/2, GPU speed 1/2; 5 puzzles: 3/5 vs 1/5). Reasoning is sampled, so the same puzzle can land either side of the clock: ZLjMR ran out of time above and was solved in 15.7 s in the agent's 2-puzzle run.
 
+## Raced live
+
+The replay keeps everything but speed the same. To check it against a real GPU host, `bun run live` sends each puzzle to Kimi K3.1 Pro on Cerebras and on Fireworks' serverless GPUs (`accounts/fireworks/models/kimi-k3p1-pro`) at the same time: the same prompt, reasoning high, each lane on 20 s from its own first token, graded the same way.
+
+Run of Nov 22, 2026 ([`runs/live/2026-11-22T09-01-04-082Z.json`](runs/live/2026-11-22T09-01-04-082Z.json)): **Cerebras 9 / 15, Fireworks 0 / 15.** Fireworks streamed a median of ≈ 40 tok/s (≈ 17–67) and every one of its lanes was still thinking at the clock: its longest 20 s came to ≈ 1,344 tokens, and Cerebras' shortest solve took 1,911. Cerebras solved a different nine this time (six overlap with the run above), since reasoning is sampled. Next to that, the replay's 156 tok/s is the generous GPU number.
+
+Fireworks' streams were cut at the clock, so their token counts (≈) are characters ÷ 2.95; three uncut probes the same day measured 49, 38 and 36 tok/s exactly. As in the replay, queueing and time to first token are not counted on either side (Cerebras' first token took up to 142 s in this run, Fireworks' up to 4 s).
+
 ## How it works
 
 ```
@@ -48,7 +56,7 @@ you ─► OpenClaw agent (Kimi K3.1 Pro on Cerebras): "Think fast: race 5 puzzl
                 └─ live race page on the Gateway: /think-fast  (board, both lanes, both clocks)
 ```
 
-- **Same model, same tokens.** The GPU lane is not a different answer: it is the exact token stream Kimi produced, at the decode rate we measured for Kimi K3.1 Pro on a GPU host (Morph via OpenRouter, 156 tok/s first token to last on a 280-token completion, Nov 22, 2026; Parasail measured 83 tok/s the same day, so 156 is the faster of the two GPU hosts we measured). The only thing that changes is speed, so the only question is whether the thinking fits in the clock. No live GPU calls were made: our OpenRouter credit only covered the rate probes.
+- **Same model, same tokens.** The GPU lane is not a different answer: it is the exact token stream Kimi produced, at the decode rate we measured for Kimi K3.1 Pro on a GPU host (Morph via OpenRouter, 156 tok/s first token to last on a 280-token completion, Nov 22, 2026; Parasail measured 83 tok/s the same day and Fireworks, [raced live](#raced-live), ≈ 40, so 156 is the fastest GPU host we measured). The only thing that changes is speed, so the only question is whether the thinking fits in the clock. The replay makes no GPU calls; [the live race](#raced-live) does.
 - **Clocks start at the first token** on both lanes. Queueing and time to first token are not counted for either side (Cerebras' first token took up to 31 s in these runs). During the hackathon, Cerebras' shared queue often answered HTTP 429 first; the tool waits that out before the clock starts.
 - **Graded by the rules of chess**, not by string match: a move scores if it is the puzzle's solution or any other move that forces mate in two.
 - **Only a committed answer scores.** Pause the XTKWJ race at the GPU lane's TIME and its text already reads "First move e6h6. Should verify notation UCI e6h6. Could be answer.": Kimi was still checking and had not written its `MOVE:` line. Under a deadline only the answer you commit to counts; the speed bought the check.
@@ -68,18 +76,19 @@ openclaw config patch --file config/openclaw.json5
 openclaw gateway                            # then open http://127.0.0.1:18789/think-fast
 ```
 
-Ask the agent in the Control UI: **"Think fast: race 5 puzzles."** Or from the terminal, the same engine without the agent: `bun run race 15 0 20` (count, first puzzle, clock in seconds). To watch the 15-puzzle run above without a key: `/think-fast?run=2026-11-22T03-32-19-317Z.json`.
+Ask the agent in the Control UI: **"Think fast: race 5 puzzles."** Or from the terminal, the same engine without the agent: `bun run race 15 0 20` (count, first puzzle, clock in seconds). To race a live GPU lane too, set `FIREWORKS_API_KEY` and run `bun run live 15 0 20`. To watch the 15-puzzle run above without a key: `/think-fast?run=2026-11-22T03-32-19-317Z.json`.
 
 ## Measured
 
 - **Cerebras, Kimi K3.1 Pro, reasoning high:** a median of 276 tok/s from first token to answer over the nine puzzles it answered (255–302; e.g. 3,708 tokens in 13.4 s), 1.8× the GPU host's 156. Under the same clock that turned into 2.25× as many puzzles solved (9 vs 4).
 - **GPU host, Kimi K3.1 Pro via OpenRouter:** Morph 156 tok/s, Parasail 83 tok/s (first token to last).
+- **GPU host, live, Kimi K3.1 Pro on Fireworks serverless:** ≈ 40 tok/s median over the 15 live lanes, 36–49 tok/s on three uncut probes. It answered none of the 15 inside 20 s.
 - **Kimi's chess:** on Cerebras it solved 9 of 15 mate-in-2 puzzles rated 1286–1590 inside 20 s, and every answer it gave was right; the six misses ran out of time. At GPU speed, five of those nine answers arrive after the clock.
 
 ## Test
 
 ```bash
-bun run test   # the chess grader against the puzzle set, the lane verdicts on a mocked Cerebras stream, and the plugin's registration
+bun run test   # the chess grader against the puzzle set, the lane verdicts on mocked Cerebras and Fireworks streams, and the plugin's registration
 ```
 
 ## Built for
